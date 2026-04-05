@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pong Arcade</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    canvas {
+      display: block;
+      background: #000;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas" width="800" height="500"></canvas>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Paddle dimensions and edge offset
+    const PADDLE_WIDTH  = 15;
+    const PADDLE_HEIGHT = 80;
+    const PADDLE_OFFSET = 20; // distance from canvas edge
+    const PADDLE_SPEED  = 5;  // pixels per frame
+
+    // Game state
+    const state = {
+      playerScore: 0,
+      aiScore: 0,
+    };
+
+    // Player paddle (left side)
+    const player = {
+      x: PADDLE_OFFSET,
+      y: canvas.height / 2 - PADDLE_HEIGHT / 2,
+      width: PADDLE_WIDTH,
+      height: PADDLE_HEIGHT,
+    };
+
+    // AI paddle (right side) - static placeholder for now
+    const ai = {
+      x: canvas.width - PADDLE_OFFSET - PADDLE_WIDTH,
+      y: canvas.height / 2 - PADDLE_HEIGHT / 2,
+      width: PADDLE_WIDTH,
+      height: PADDLE_HEIGHT,
+    };
+
+    // Track which keys are currently held down
+    const keys = {};
+
+    document.addEventListener('keydown', (e) => { keys[e.key] = true; });
+    document.addEventListener('keyup',   (e) => { keys[e.key] = false; });
+
+    // Move player paddle based on held keys, clamped to canvas
+    function updatePlayer() {
+      if (keys['w'] || keys['W'] || keys['ArrowUp']) {
+        player.y -= PADDLE_SPEED;
+      }
+      if (keys['s'] || keys['S'] || keys['ArrowDown']) {
+        player.y += PADDLE_SPEED;
+      }
+
+      // Clamp so paddle can't leave the canvas
+      player.y = Math.max(0, Math.min(canvas.height - player.height, player.y));
+    }
+
+    // Draw a single paddle
+    function drawPaddle(paddle) {
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(paddle.x, paddle.y, paddle.width, paddle.height);
+    }
+
+    // Draw the dotted center line
+    function drawCenterLine() {
+      ctx.setLineDash([10, 15]);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(canvas.width / 2, 0);
+      ctx.lineTo(canvas.width / 2, canvas.height);
+      ctx.stroke();
+      ctx.setLineDash([]); // reset dash
+    }
+
+    // Draw score display
+    function drawScore() {
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 48px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+
+      // Player score (left of center)
+      ctx.fillText(state.playerScore, canvas.width / 2 - 80, 20);
+
+      // AI score (right of center)
+      ctx.fillText(state.aiScore, canvas.width / 2 + 80, 20);
+    }
+
+    // Update game logic
+    function update() {
+      updatePlayer();
+    }
+
+    // Draw everything
+    function draw() {
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      drawCenterLine();
+      drawScore();
+      drawPaddle(player);
+      drawPaddle(ai);
+    }
+
+    // Main game loop
+    function loop() {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    // Start the loop
+    loop();
+  </script>
+</body>
+</html>
