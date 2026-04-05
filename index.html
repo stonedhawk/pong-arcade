@@ -19,14 +19,38 @@
       min-height: 100vh;
     }
 
+    /* Wrapper positions the canvas and the scanline overlay together */
+    .canvas-wrap {
+      position: relative;
+      width: 800px;
+      height: 500px;
+    }
+
     canvas {
       display: block;
       background: #000;
     }
+
+    /* Subtle CRT scanline overlay - repeating dark horizontal lines */
+    .scanlines {
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        to bottom,
+        transparent 0px,
+        transparent 3px,
+        rgba(0, 0, 0, 0.18) 3px,
+        rgba(0, 0, 0, 0.18) 4px
+      );
+      pointer-events: none; /* clicks pass through to the canvas */
+    }
   </style>
 </head>
 <body>
-  <canvas id="gameCanvas" width="800" height="500"></canvas>
+  <div class="canvas-wrap">
+    <canvas id="gameCanvas" width="800" height="500"></canvas>
+    <div class="scanlines"></div>
+  </div>
 
   <script>
     const canvas = document.getElementById('gameCanvas');
@@ -35,17 +59,28 @@
     // Paddle dimensions and edge offset
     const PADDLE_WIDTH  = 15;
     const PADDLE_HEIGHT = 80;
-    const PADDLE_OFFSET = 20;  // distance from canvas edge
-    const PADDLE_SPEED  = 5;   // pixels per frame
+    const PADDLE_OFFSET = 20;   // distance from canvas edge
+    const PADDLE_SPEED  = 5;    // pixels per frame
 
     // Ball constants
-    const BALL_RADIUS      = 10;
-    const BALL_SPEED_INIT  = 5;   // starting speed
-    const BALL_SPEED_MAX   = 10;  // cap so it never becomes unplayable
-    const BALL_SPEED_INC   = 0.3; // speed added on each paddle hit
-    const RESET_DELAY_MS   = 800; // pause after a score before ball moves
+    const BALL_RADIUS     = 10;
+    const BALL_SPEED_INIT = 5;   // starting speed
+    const BALL_SPEED_MAX  = 10;  // cap so it never becomes unplayable
+    const BALL_SPEED_INC  = 0.3; // speed added on each paddle hit
+    const RESET_DELAY_MS  = 800; // pause after a score before ball moves
 
-    // Game state
+    // Win condition
+    const WIN_SCORE = 7;
+
+    // Trail: store recent ball positions for the fading effect
+    const TRAIL_LENGTH = 8;
+    const trail = [];
+
+    // Game phase: 'start' | 'playing' | 'over'
+    let phase = 'start';
+    let winner = ''; // 'Player' or 'AI'
+
+    // Scores
     const state = {
       playerScore: 0,
       aiScore: 0,
@@ -75,13 +110,26 @@
       radius: BALL_RADIUS,
       vx: 0,
       vy: 0,
-      frozen: true, // true while waiting after a score
+      frozen: true,
     };
+
+    // Reset paddles and scores for a fresh game
+    function resetGame() {
+      state.playerScore = 0;
+      state.aiScore     = 0;
+      player.y = canvas.height / 2 - PADDLE_HEIGHT / 2;
+      ai.y     = canvas.height / 2 - PADDLE_HEIGHT / 2;
+      trail.length = 0;
+      ball.frozen = true;
+      ball.x = canvas.width / 2;
+      ball.y = canvas.height / 2;
+    }
 
     // Launch the ball from center toward a random side
     function launchBall() {
-      const angle = (Math.random() * 60 - 30) * (Math.PI / 180); // -30 to +30 degrees
-      const dir   = Math.random() < 0.5 ? 1 : -1;                // left or right
+      if (phase !== 'playing') return;
+      const angle = (Math.random() * 60 - 30) * (Math.PI / 180);
+      const dir   = Math.random() < 0.5 ? 1 : -1;
       ball.x  = canvas.width / 2;
       ball.y  = canvas.height / 2;
       ball.vx = dir * BALL_SPEED_INIT * Math.cos(angle);
@@ -89,17 +137,31 @@
       ball.frozen = false;
     }
 
-    // Start first ball after a short delay
-    setTimeout(launchBall, RESET_DELAY_MS);
-
     // Track which keys are currently held down
     const keys = {};
 
-    document.addEventListener('keydown', (e) => { keys[e.key] = true; });
-    document.addEventListener('keyup',   (e) => { keys[e.key] = false; });
+    document.addEventListener('keydown', (e) => {
+      keys[e.key] = true;
+
+      // SPACE advances game phase
+      if (e.key === ' ') {
+        if (phase === 'start') {
+          phase = 'playing';
+          setTimeout(launchBall, RESET_DELAY_MS);
+        } else if (phase === 'over') {
+          resetGame();
+          phase = 'playing';
+          setTimeout(launchBall, RESET_DELAY_MS);
+        }
+      }
+    });
+
+    document.addEventListener('keyup', (e) => { keys[e.key] = false; });
 
     // Move player paddle based on held keys, clamped to canvas
     function updatePlayer() {
+      if (phase !== 'playing') return;
+
       if (keys['w'] || keys['W'] || keys['ArrowUp']) {
         player.y -= PADDLE_SPEED;
       }
@@ -120,23 +182,18 @@
 
     // Reflect ball off a paddle, adjusting angle by hit position
     function reflectOffPaddle(b, paddle) {
-      // How far from paddle center the ball hit (-1 top, +1 bottom)
-      const relHit  = (b.y - (paddle.y + paddle.height / 2)) / (paddle.height / 2);
+      const relHit   = (b.y - (paddle.y + paddle.height / 2)) / (paddle.height / 2);
       const maxAngle = 60 * (Math.PI / 180);
-      const angle   = relHit * maxAngle;
-
-      // Speed increases a little on each hit
-      const speed = Math.min(Math.hypot(b.vx, b.vy) + BALL_SPEED_INC, BALL_SPEED_MAX);
-      const dir   = b.vx < 0 ? 1 : -1; // reverse horizontal direction
-
+      const angle    = relHit * maxAngle;
+      const speed    = Math.min(Math.hypot(b.vx, b.vy) + BALL_SPEED_INC, BALL_SPEED_MAX);
+      const dir      = b.vx < 0 ? 1 : -1;
       b.vx = dir * speed * Math.cos(angle);
       b.vy = speed * Math.sin(angle);
     }
 
-    // Move AI paddle toward the ball, but only when ball is heading its way
+    // Move AI paddle toward the ball, only when ball is heading its way
     function updateAI() {
-      // Only react when ball is moving toward the AI side
-      if (ball.frozen || ball.vx < 0) return;
+      if (phase !== 'playing' || ball.frozen || ball.vx < 0) return;
 
       const paddleCenter = ai.y + ai.height / 2;
 
@@ -146,13 +203,16 @@
         ai.y += ai.speed;
       }
 
-      // Clamp to canvas bounds
       ai.y = Math.max(0, Math.min(canvas.height - ai.height, ai.y));
     }
 
     // Update ball position, wall bounces, paddle collisions, and scoring
     function updateBall() {
-      if (ball.frozen) return;
+      if (phase !== 'playing' || ball.frozen) return;
+
+      // Record position for trail before moving
+      trail.push({ x: ball.x, y: ball.y });
+      if (trail.length > TRAIL_LENGTH) trail.shift();
 
       ball.x += ball.vx;
       ball.y += ball.vy;
@@ -171,13 +231,13 @@
 
       // Bounce off player paddle (left)
       if (ball.vx < 0 && circleHitsPaddle(ball, player)) {
-        ball.x = player.x + player.width + ball.radius; // push out of paddle
+        ball.x = player.x + player.width + ball.radius;
         reflectOffPaddle(ball, player);
       }
 
       // Bounce off AI paddle (right)
       if (ball.vx > 0 && circleHitsPaddle(ball, ai)) {
-        ball.x = ai.x - ball.radius; // push out of paddle
+        ball.x = ai.x - ball.radius;
         reflectOffPaddle(ball, ai);
       }
 
@@ -185,32 +245,55 @@
       if (ball.x + ball.radius < 0) {
         state.aiScore++;
         ball.frozen = true;
-        setTimeout(launchBall, RESET_DELAY_MS);
+        trail.length = 0;
+        if (state.aiScore >= WIN_SCORE) {
+          winner = 'AI';
+          phase  = 'over';
+        } else {
+          setTimeout(launchBall, RESET_DELAY_MS);
+        }
       }
 
       // Ball exits right - player scores
       if (ball.x - ball.radius > canvas.width) {
         state.playerScore++;
         ball.frozen = true;
-        setTimeout(launchBall, RESET_DELAY_MS);
+        trail.length = 0;
+        if (state.playerScore >= WIN_SCORE) {
+          winner = 'Player';
+          phase  = 'over';
+        } else {
+          setTimeout(launchBall, RESET_DELAY_MS);
+        }
       }
     }
 
-    // Draw a single paddle
+    // ---- Draw helpers ----
+
     function drawPaddle(paddle) {
       ctx.fillStyle = '#fff';
       ctx.fillRect(paddle.x, paddle.y, paddle.width, paddle.height);
     }
 
-    // Draw the ball
+    // Draw fading trail then the ball itself
     function drawBall() {
+      // Trail dots - older positions are more transparent
+      for (let i = 0; i < trail.length; i++) {
+        const alpha  = (i + 1) / (trail.length + 1) * 0.5; // max 0.5 opacity
+        const radius = ball.radius * ((i + 1) / trail.length) * 0.7;
+        ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(trail[i].x, trail[i].y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Main ball
       ctx.fillStyle = '#fff';
       ctx.beginPath();
       ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Draw the dotted center line
     function drawCenterLine() {
       ctx.setLineDash([10, 15]);
       ctx.strokeStyle = '#fff';
@@ -219,10 +302,9 @@
       ctx.moveTo(canvas.width / 2, 0);
       ctx.lineTo(canvas.width / 2, canvas.height);
       ctx.stroke();
-      ctx.setLineDash([]); // reset dash
+      ctx.setLineDash([]);
     }
 
-    // Draw score display
     function drawScore() {
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 48px monospace';
@@ -232,24 +314,59 @@
       ctx.fillText(state.aiScore,     canvas.width / 2 + 80, 20);
     }
 
-    // Update game logic
+    // Semi-transparent dark overlay for menu screens
+    function drawOverlay() {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function drawStartScreen() {
+      drawOverlay();
+
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 96px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('PONG', canvas.width / 2, canvas.height / 2 - 40);
+
+      ctx.font = '24px monospace';
+      ctx.fillText('Press SPACE to start', canvas.width / 2, canvas.height / 2 + 40);
+    }
+
+    function drawGameOverScreen() {
+      drawOverlay();
+
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 64px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`${winner} Wins!`, canvas.width / 2, canvas.height / 2 - 40);
+
+      ctx.font = '24px monospace';
+      ctx.fillText('Press SPACE to play again', canvas.width / 2, canvas.height / 2 + 40);
+    }
+
+    // ---- Main loop ----
+
     function update() {
       updatePlayer();
       updateAI();
       updateBall();
     }
 
-    // Draw everything
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+
       drawCenterLine();
       drawScore();
       drawPaddle(player);
       drawPaddle(ai);
       drawBall();
+
+      if (phase === 'start') drawStartScreen();
+      if (phase === 'over')  drawGameOverScreen();
     }
 
-    // Main game loop
     function loop() {
       update();
       draw();
