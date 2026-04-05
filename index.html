@@ -59,12 +59,13 @@
       height: PADDLE_HEIGHT,
     };
 
-    // AI paddle (right side) - static placeholder until Step 4
+    // AI paddle (right side)
     const ai = {
       x: canvas.width - PADDLE_OFFSET - PADDLE_WIDTH,
       y: canvas.height / 2 - PADDLE_HEIGHT / 2,
       width: PADDLE_WIDTH,
       height: PADDLE_HEIGHT,
+      speed: BALL_SPEED_INIT * 0.7, // reacts at 70% of initial ball speed
     };
 
     // Ball
@@ -130,6 +131,23 @@
 
       b.vx = dir * speed * Math.cos(angle);
       b.vy = speed * Math.sin(angle);
+    }
+
+    // Move AI paddle toward the ball, but only when ball is heading its way
+    function updateAI() {
+      // Only react when ball is moving toward the AI side
+      if (ball.frozen || ball.vx < 0) return;
+
+      const paddleCenter = ai.y + ai.height / 2;
+
+      if (ball.y < paddleCenter - 5) {
+        ai.y -= ai.speed;
+      } else if (ball.y > paddleCenter + 5) {
+        ai.y += ai.speed;
+      }
+
+      // Clamp to canvas bounds
+      ai.y = Math.max(0, Math.min(canvas.height - ai.height, ai.y));
     }
 
     // Update ball position, wall bounces, paddle collisions, and scoring
@@ -217,6 +235,7 @@
     // Update game logic
     function update() {
       updatePlayer();
+      updateAI();
       updateBall();
     }
 
