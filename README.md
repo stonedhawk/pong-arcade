@@ -10,6 +10,8 @@ A browser-based classic Pong game — no frameworks, no build tools, just one HT
 
 ## How to Play
 
+Use **W/S** or **Arrow keys** to move your paddle. First to 7 points wins.
+
 | Action | Keys |
 |--------|------|
 | Move paddle up | W or Arrow Up |
