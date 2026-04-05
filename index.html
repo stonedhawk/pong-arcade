@@ -35,8 +35,15 @@
     // Paddle dimensions and edge offset
     const PADDLE_WIDTH  = 15;
     const PADDLE_HEIGHT = 80;
-    const PADDLE_OFFSET = 20; // distance from canvas edge
-    const PADDLE_SPEED  = 5;  // pixels per frame
+    const PADDLE_OFFSET = 20;  // distance from canvas edge
+    const PADDLE_SPEED  = 5;   // pixels per frame
+
+    // Ball constants
+    const BALL_RADIUS      = 10;
+    const BALL_SPEED_INIT  = 5;   // starting speed
+    const BALL_SPEED_MAX   = 10;  // cap so it never becomes unplayable
+    const BALL_SPEED_INC   = 0.3; // speed added on each paddle hit
+    const RESET_DELAY_MS   = 800; // pause after a score before ball moves
 
     // Game state
     const state = {
@@ -52,13 +59,37 @@
       height: PADDLE_HEIGHT,
     };
 
-    // AI paddle (right side) - static placeholder for now
+    // AI paddle (right side) - static placeholder until Step 4
     const ai = {
       x: canvas.width - PADDLE_OFFSET - PADDLE_WIDTH,
       y: canvas.height / 2 - PADDLE_HEIGHT / 2,
       width: PADDLE_WIDTH,
       height: PADDLE_HEIGHT,
     };
+
+    // Ball
+    const ball = {
+      x: canvas.width / 2,
+      y: canvas.height / 2,
+      radius: BALL_RADIUS,
+      vx: 0,
+      vy: 0,
+      frozen: true, // true while waiting after a score
+    };
+
+    // Launch the ball from center toward a random side
+    function launchBall() {
+      const angle = (Math.random() * 60 - 30) * (Math.PI / 180); // -30 to +30 degrees
+      const dir   = Math.random() < 0.5 ? 1 : -1;                // left or right
+      ball.x  = canvas.width / 2;
+      ball.y  = canvas.height / 2;
+      ball.vx = dir * BALL_SPEED_INIT * Math.cos(angle);
+      ball.vy = BALL_SPEED_INIT * Math.sin(angle);
+      ball.frozen = false;
+    }
+
+    // Start first ball after a short delay
+    setTimeout(launchBall, RESET_DELAY_MS);
 
     // Track which keys are currently held down
     const keys = {};
@@ -74,15 +105,91 @@
       if (keys['s'] || keys['S'] || keys['ArrowDown']) {
         player.y += PADDLE_SPEED;
       }
-
-      // Clamp so paddle can't leave the canvas
       player.y = Math.max(0, Math.min(canvas.height - player.height, player.y));
+    }
+
+    // Check axis-aligned rectangle vs circle collision
+    function circleHitsPaddle(b, paddle) {
+      const nearX = Math.max(paddle.x, Math.min(b.x, paddle.x + paddle.width));
+      const nearY = Math.max(paddle.y, Math.min(b.y, paddle.y + paddle.height));
+      const dx = b.x - nearX;
+      const dy = b.y - nearY;
+      return dx * dx + dy * dy <= b.radius * b.radius;
+    }
+
+    // Reflect ball off a paddle, adjusting angle by hit position
+    function reflectOffPaddle(b, paddle) {
+      // How far from paddle center the ball hit (-1 top, +1 bottom)
+      const relHit  = (b.y - (paddle.y + paddle.height / 2)) / (paddle.height / 2);
+      const maxAngle = 60 * (Math.PI / 180);
+      const angle   = relHit * maxAngle;
+
+      // Speed increases a little on each hit
+      const speed = Math.min(Math.hypot(b.vx, b.vy) + BALL_SPEED_INC, BALL_SPEED_MAX);
+      const dir   = b.vx < 0 ? 1 : -1; // reverse horizontal direction
+
+      b.vx = dir * speed * Math.cos(angle);
+      b.vy = speed * Math.sin(angle);
+    }
+
+    // Update ball position, wall bounces, paddle collisions, and scoring
+    function updateBall() {
+      if (ball.frozen) return;
+
+      ball.x += ball.vx;
+      ball.y += ball.vy;
+
+      // Bounce off top wall
+      if (ball.y - ball.radius <= 0) {
+        ball.y = ball.radius;
+        ball.vy = Math.abs(ball.vy);
+      }
+
+      // Bounce off bottom wall
+      if (ball.y + ball.radius >= canvas.height) {
+        ball.y = canvas.height - ball.radius;
+        ball.vy = -Math.abs(ball.vy);
+      }
+
+      // Bounce off player paddle (left)
+      if (ball.vx < 0 && circleHitsPaddle(ball, player)) {
+        ball.x = player.x + player.width + ball.radius; // push out of paddle
+        reflectOffPaddle(ball, player);
+      }
+
+      // Bounce off AI paddle (right)
+      if (ball.vx > 0 && circleHitsPaddle(ball, ai)) {
+        ball.x = ai.x - ball.radius; // push out of paddle
+        reflectOffPaddle(ball, ai);
+      }
+
+      // Ball exits left - AI scores
+      if (ball.x + ball.radius < 0) {
+        state.aiScore++;
+        ball.frozen = true;
+        setTimeout(launchBall, RESET_DELAY_MS);
+      }
+
+      // Ball exits right - player scores
+      if (ball.x - ball.radius > canvas.width) {
+        state.playerScore++;
+        ball.frozen = true;
+        setTimeout(launchBall, RESET_DELAY_MS);
+      }
     }
 
     // Draw a single paddle
     function drawPaddle(paddle) {
       ctx.fillStyle = '#fff';
       ctx.fillRect(paddle.x, paddle.y, paddle.width, paddle.height);
+    }
+
+    // Draw the ball
+    function drawBall() {
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     // Draw the dotted center line
@@ -103,28 +210,24 @@
       ctx.font = 'bold 48px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-
-      // Player score (left of center)
       ctx.fillText(state.playerScore, canvas.width / 2 - 80, 20);
-
-      // AI score (right of center)
-      ctx.fillText(state.aiScore, canvas.width / 2 + 80, 20);
+      ctx.fillText(state.aiScore,     canvas.width / 2 + 80, 20);
     }
 
     // Update game logic
     function update() {
       updatePlayer();
+      updateBall();
     }
 
     // Draw everything
     function draw() {
-      // Clear canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-
       drawCenterLine();
       drawScore();
       drawPaddle(player);
       drawPaddle(ai);
+      drawBall();
     }
 
     // Main game loop
@@ -134,7 +237,6 @@
       requestAnimationFrame(loop);
     }
 
-    // Start the loop
     loop();
   </script>
 </body>
